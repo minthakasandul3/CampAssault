@@ -116,3 +116,19 @@ InitTestScene*.unity*
 # Unity Terrain Sample - third-party Asset Store content
 Assets/TerrainSampleAssets/
 Assets/TerrainSampleAssets.meta
+
+# Low Poly Soldiers Demo
+Assets/LowPolySoldiers_demo/
+Assets/LowPolySoldiers_demo.meta
+
+# Human Soldier Animations FREE
+Assets/Kevin Iglesias/
+Assets/Kevin Iglesias.meta
+
+# Toon RTS Units Demo
+Assets/Toon_RTS_demo/
+Assets/Toon_RTS_demo.meta
+
+# Sci-Fi Soldier / Yurowm assets
+Assets/Yurowm/
+Assets/Yurowm.meta
