@@ -14,6 +14,9 @@ public class PlayerHealth : MonoBehaviour
     private float currentHealth;
     private bool isDead = false;
 
+    // Allows EnemyAI to check whether the player is dead
+    public bool IsDead => isDead;
+
     void Start()
     {
         currentHealth = maxHealth;
@@ -52,7 +55,10 @@ public class PlayerHealth : MonoBehaviour
             healthBar.value = currentHealth;
         }
 
-        Debug.Log("Player Health: " + currentHealth);
+        Debug.Log(
+            "Player Health: " +
+            currentHealth
+        );
 
         if (currentHealth <= 0f)
         {
@@ -62,11 +68,14 @@ public class PlayerHealth : MonoBehaviour
 
     void Die()
     {
+        if (isDead)
+            return;
+
         isDead = true;
 
         Debug.Log("Player died.");
 
-        // Show Game Over screen
+        // Show Game Over
         if (gameOverPanel != null)
         {
             gameOverPanel.SetActive(true);
@@ -84,7 +93,7 @@ public class PlayerHealth : MonoBehaviour
             crosshair.SetActive(false);
         }
 
-        // Disable movement
+        // Stop player movement
         FirstPersonController movement =
             GetComponent<FirstPersonController>();
 
@@ -93,7 +102,7 @@ public class PlayerHealth : MonoBehaviour
             movement.enabled = false;
         }
 
-        // Disable mouse look
+        // Stop mouse look
         MouseLook mouseLook =
             GetComponentInChildren<MouseLook>();
 
@@ -102,7 +111,7 @@ public class PlayerHealth : MonoBehaviour
             mouseLook.enabled = false;
         }
 
-        // Disable shooting
+        // Stop player shooting
         GunShoot gunShoot =
             GetComponentInChildren<GunShoot>();
 
@@ -111,8 +120,10 @@ public class PlayerHealth : MonoBehaviour
             gunShoot.enabled = false;
         }
 
-        // Unlock cursor
-        Cursor.lockState = CursorLockMode.None;
+        // Release mouse cursor
+        Cursor.lockState =
+            CursorLockMode.None;
+
         Cursor.visible = true;
     }
 }
