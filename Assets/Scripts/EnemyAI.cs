@@ -10,7 +10,7 @@ public class EnemyAI : MonoBehaviour
     public Animator animator;
 
     [Header("Detection")]
-    public float detectionRange = 15f;
+    public float detectionRange = 8f;
     public float sightRange = 70f;
     public float fieldOfView = 110f;
     public float stopChasingRange = 90f;
@@ -23,8 +23,19 @@ public class EnemyAI : MonoBehaviour
     public float chaseSpeed = 3.5f;
 
     [Header("Patrol")]
-    public float patrolWaitTime = 2f;
-    public float patrolTurnSpeed = 5f;
+    public float patrolWaitTime = 4f;
+    public float patrolTurnSpeed = 8f;
+    public float patrolTurnTolerance = 2f;
+    public float patrolStoppingDistance = 0.15f;
+    public float arrivalRotationLockDistance = 0.6f;
+
+    [Header("Turning")]
+    public float chaseTurnSpeed = 180f;
+    public float combatTurnSpeed = 180f;
+    public float attackFacingTolerance = 6f;
+
+    [Header("Animation")]
+    public float movementAnimationDamping = 0.08f;
 
     [Header("Attack")]
     public float attackRange = 15f;
@@ -46,10 +57,16 @@ public class EnemyAI : MonoBehaviour
     private bool chasingPlayer = false;
     private bool playerDeathHandled = false;
 
+    private bool waitingAtPatrolPoint = false;
+    private bool arrivalRotationLocked = false;
+
     private bool isBursting = false;
     private int shotsFiredInBurst = 0;
     private float shotTimer = 0f;
     private float burstTimer = 0f;
+
+    private float desiredMoveSpeed = 0f;
+
 
     void Start()
     {
@@ -69,9 +86,16 @@ public class EnemyAI : MonoBehaviour
         if (AgentReady())
         {
             agent.speed = patrolSpeed;
+            agent.stoppingDistance =
+                patrolStoppingDistance;
+
+            agent.autoBraking = true;
+            agent.updateRotation = true;
         }
 
-        SetMovementAnimation(false, false);
+        desiredMoveSpeed = 0f;
+
+        SetMoveSpeedImmediate(0f);
         SetCombatAnimation(false);
 
         if (patrolPoints != null &&
@@ -80,6 +104,7 @@ public class EnemyAI : MonoBehaviour
             GoToCurrentPatrolPoint();
         }
     }
+
 
     void Update()
     {
@@ -122,12 +147,32 @@ public class EnemyAI : MonoBehaviour
         bool canSeePlayer =
             CanSeePlayer();
 
+        bool hasLineOfSight =
+            HasLineOfSightToPlayer();
+
+
+        // ========================================
+        // DETECTION
+        // ========================================
+
         if (distanceToPlayer <= detectionRange ||
             canSeePlayer)
         {
             chasingPlayer = true;
-            alertTimer = alertMemoryDuration;
+
+            alertTimer =
+                alertMemoryDuration;
+
+            waitingAtPatrolPoint = false;
+            arrivalRotationLocked = false;
+
+            waitTimer = 0f;
         }
+
+
+        // ========================================
+        // STOP CHASING
+        // ========================================
 
         if (chasingPlayer &&
             distanceToPlayer > stopChasingRange &&
@@ -136,9 +181,17 @@ public class EnemyAI : MonoBehaviour
             StopChasing();
         }
 
+
+        // ========================================
+        // STATE DECISION
+        // ========================================
+
         if (chasingPlayer)
         {
-            if (distanceToPlayer <= attackRange)
+            // Attack only when close enough
+            // AND there is a clear path to player.
+            if (distanceToPlayer <= attackRange &&
+                hasLineOfSight)
             {
                 AttackPlayer();
             }
@@ -151,7 +204,15 @@ public class EnemyAI : MonoBehaviour
         {
             Patrol();
         }
+
+
+        UpdateMovementAnimation();
     }
+
+
+    // ========================================================
+    // VISUAL DETECTION
+    // ========================================================
 
     bool CanSeePlayer()
     {
@@ -159,31 +220,10 @@ public class EnemyAI : MonoBehaviour
             return false;
 
         Vector3 enemyEyePosition =
-            transform.position +
-            Vector3.up * 1.5f;
+            GetEnemyEyePosition();
 
         Vector3 playerTargetPosition =
-            player.position;
-
-        CharacterController playerController =
-            player.GetComponent<CharacterController>();
-
-        if (playerController != null)
-        {
-            playerTargetPosition =
-                playerController.bounds.center;
-        }
-        else
-        {
-            Collider playerCollider =
-                player.GetComponentInChildren<Collider>();
-
-            if (playerCollider != null)
-            {
-                playerTargetPosition =
-                    playerCollider.bounds.center;
-            }
-        }
+            GetPlayerTargetPosition();
 
         Vector3 directionToPlayer =
             playerTargetPosition -
@@ -209,11 +249,89 @@ public class EnemyAI : MonoBehaviour
             return false;
         }
 
+        return HasClearRayToPlayer(
+            enemyEyePosition,
+            playerTargetPosition
+        );
+    }
+
+
+    // ========================================================
+    // LINE OF SIGHT
+    // ========================================================
+
+    bool HasLineOfSightToPlayer()
+    {
+        if (player == null)
+            return false;
+
+        Vector3 enemyEyePosition =
+            GetEnemyEyePosition();
+
+        Vector3 playerTargetPosition =
+            GetPlayerTargetPosition();
+
+        return HasClearRayToPlayer(
+            enemyEyePosition,
+            playerTargetPosition
+        );
+    }
+
+
+    Vector3 GetEnemyEyePosition()
+    {
+        return transform.position +
+               Vector3.up * 1.5f;
+    }
+
+
+    Vector3 GetPlayerTargetPosition()
+    {
+        Vector3 targetPosition =
+            player.position;
+
+        CharacterController playerController =
+            player.GetComponent<CharacterController>();
+
+        if (playerController != null)
+        {
+            return playerController.bounds.center;
+        }
+
+        Collider playerCollider =
+            player.GetComponentInChildren<Collider>();
+
+        if (playerCollider != null)
+        {
+            targetPosition =
+                playerCollider.bounds.center;
+        }
+
+        return targetPosition;
+    }
+
+
+    bool HasClearRayToPlayer(
+        Vector3 start,
+        Vector3 target
+    )
+    {
+        Vector3 direction =
+            target - start;
+
+        float distance =
+            direction.magnitude;
+
+        if (distance <= 0.001f)
+            return true;
+
+        direction.Normalize();
+
         RaycastHit[] hits =
             Physics.RaycastAll(
-                enemyEyePosition,
-                directionToPlayer,
-                distanceToPlayer,
+                start,
+                direction,
+                distance,
                 Physics.AllLayers,
                 QueryTriggerInteraction.Ignore
             );
@@ -228,83 +346,169 @@ public class EnemyAI : MonoBehaviour
 
         foreach (RaycastHit hit in hits)
         {
-            // Ignore this enemy
+            // Ignore this enemy.
             if (hit.transform == transform ||
                 hit.transform.IsChildOf(transform))
             {
                 continue;
             }
 
-            // Player visible
+            // Player reached first.
             if (hit.transform == player ||
                 hit.transform.IsChildOf(player))
             {
-                Debug.DrawLine(
-                    enemyEyePosition,
-                    playerTargetPosition,
-                    Color.green
-                );
-
                 return true;
             }
 
-            // Something blocks vision
-            Debug.DrawLine(
-                enemyEyePosition,
-                hit.point,
-                Color.red
-            );
-
+            // Obstacle blocks player.
             return false;
         }
 
         return false;
     }
 
+
+    // ========================================================
+    // CHASE
+    // ========================================================
+
     void ChasePlayer()
     {
         ResetBurst();
 
-        if (!AgentReady())
-        {
-            SetMovementAnimation(
-                false,
-                false
-            );
+        waitingAtPatrolPoint = false;
+        arrivalRotationLocked = false;
 
+        waitTimer = 0f;
+
+        if (!AgentReady())
             return;
-        }
+
+
+        // ----------------------------------------
+        // ANIMATION
+        // ----------------------------------------
+
+        desiredMoveSpeed =
+            chaseSpeed;
+
+        SetMoveSpeedImmediate(
+            chaseSpeed
+        );
+
+        SetCombatAnimation(false);
+
+
+        // ----------------------------------------
+        // MOVEMENT
+        // ----------------------------------------
 
         agent.isStopped = false;
         agent.speed = chaseSpeed;
 
-        SetCombatAnimation(true);
-
-        SetMovementAnimation(
-            false,
-            true
-        );
+        // IMPORTANT:
+        // NavMesh still calculates the path,
+        // but our script controls rotation.
+        agent.updateRotation = false;
 
         agent.SetDestination(
             player.position
         );
+
+
+        // Rotate towards the NavMesh's desired
+        // movement direction.
+        FaceChaseDirection();
     }
+
+
+    // ========================================================
+    // CHASE ROTATION
+    // ========================================================
+
+    void FaceChaseDirection()
+    {
+        if (!AgentReady())
+            return;
+
+        Vector3 direction =
+            agent.desiredVelocity;
+
+        direction.y = 0f;
+
+        if (direction.sqrMagnitude <= 0.01f)
+            return;
+
+        Quaternion targetRotation =
+            Quaternion.LookRotation(
+                direction.normalized
+            );
+
+        transform.rotation =
+            Quaternion.RotateTowards(
+                transform.rotation,
+                targetRotation,
+                chaseTurnSpeed *
+                Time.deltaTime
+            );
+    }
+
+
+    // ========================================================
+    // ATTACK
+    // ========================================================
 
     void AttackPlayer()
     {
+        waitingAtPatrolPoint = false;
+        arrivalRotationLocked = false;
+
+        waitTimer = 0f;
+
         if (AgentReady())
         {
             agent.isStopped = true;
+
+            agent.velocity =
+                Vector3.zero;
+
+            // Script controls rotation.
+            agent.updateRotation = false;
         }
+
+
+        desiredMoveSpeed = 0f;
 
         SetCombatAnimation(true);
 
-        SetMovementAnimation(
-            false,
-            false
-        );
 
-        FacePlayer();
+        // ----------------------------------------
+        // TURN TOWARDS PLAYER FIRST
+        // ----------------------------------------
+
+        bool facingPlayer =
+            FacePlayer();
+
+
+        // Do not shoot while turning.
+        if (!facingPlayer)
+        {
+            ResetBurst();
+            return;
+        }
+
+
+        // Do not shoot through obstacles.
+        if (!HasLineOfSightToPlayer())
+        {
+            ResetBurst();
+            return;
+        }
+
+
+        // ----------------------------------------
+        // SHOOT
+        // ----------------------------------------
 
         if (isBursting)
         {
@@ -322,14 +526,69 @@ public class EnemyAI : MonoBehaviour
         }
     }
 
+
+    // ========================================================
+    // COMBAT ROTATION
+    // ========================================================
+
+    bool FacePlayer()
+    {
+        if (player == null)
+            return false;
+
+        Vector3 targetPosition =
+            GetPlayerTargetPosition();
+
+        Vector3 direction =
+            targetPosition -
+            transform.position;
+
+        direction.y = 0f;
+
+        if (direction.sqrMagnitude <= 0.001f)
+        {
+            return true;
+        }
+
+        Quaternion targetRotation =
+            Quaternion.LookRotation(
+                direction.normalized
+            );
+
+        transform.rotation =
+            Quaternion.RotateTowards(
+                transform.rotation,
+                targetRotation,
+                combatTurnSpeed *
+                Time.deltaTime
+            );
+
+        float remainingAngle =
+            Quaternion.Angle(
+                transform.rotation,
+                targetRotation
+            );
+
+        return remainingAngle <=
+               attackFacingTolerance;
+    }
+
+
+    // ========================================================
+    // BURST FIRE
+    // ========================================================
+
     void StartBurst()
     {
         isBursting = true;
+
         shotsFiredInBurst = 0;
+
         shotTimer = 0f;
 
         FireShot();
     }
+
 
     void FireShot()
     {
@@ -357,6 +616,7 @@ public class EnemyAI : MonoBehaviour
             shotsPerBurst)
         {
             isBursting = false;
+
             shotsFiredInBurst = 0;
 
             burstTimer =
@@ -371,40 +631,20 @@ public class EnemyAI : MonoBehaviour
         }
     }
 
+
     void ResetBurst()
     {
         isBursting = false;
+
         shotsFiredInBurst = 0;
+
         shotTimer = 0f;
     }
 
-    void FacePlayer()
-    {
-        if (player == null)
-            return;
 
-        Vector3 direction =
-            player.position -
-            transform.position;
-
-        direction.y = 0f;
-
-        if (direction.sqrMagnitude >
-            0.001f)
-        {
-            Quaternion targetRotation =
-                Quaternion.LookRotation(
-                    direction
-                );
-
-            transform.rotation =
-                Quaternion.Slerp(
-                    transform.rotation,
-                    targetRotation,
-                    6f * Time.deltaTime
-                );
-        }
-    }
+    // ========================================================
+    // PATROL
+    // ========================================================
 
     void Patrol()
     {
@@ -415,106 +655,194 @@ public class EnemyAI : MonoBehaviour
         if (patrolPoints == null ||
             patrolPoints.Length == 0)
         {
-            SetMovementAnimation(
-                false,
-                false
-            );
-
+            desiredMoveSpeed = 0f;
             return;
         }
 
         if (!AgentReady())
         {
-            SetMovementAnimation(
-                false,
-                false
-            );
+            desiredMoveSpeed = 0f;
+            return;
+        }
+
+        agent.speed =
+            patrolSpeed;
+
+        agent.stoppingDistance =
+            patrolStoppingDistance;
+
+        agent.autoBraking = true;
+
+
+        // ----------------------------------------
+        // WAITING AT PATROL POINT
+        // ----------------------------------------
+
+        if (waitingAtPatrolPoint)
+        {
+            agent.isStopped = true;
+
+            agent.velocity =
+                Vector3.zero;
+
+            agent.updateRotation = false;
+
+            desiredMoveSpeed = 0f;
+
+            bool finishedTurning =
+                FacePatrolDirection();
+
+            if (finishedTurning)
+            {
+                waitTimer +=
+                    Time.deltaTime;
+
+                if (waitTimer >=
+                    patrolWaitTime)
+                {
+                    waitTimer = 0f;
+
+                    waitingAtPatrolPoint =
+                        false;
+
+                    arrivalRotationLocked =
+                        false;
+
+                    currentPatrolPoint++;
+
+                    if (currentPatrolPoint >=
+                        patrolPoints.Length)
+                    {
+                        currentPatrolPoint = 0;
+                    }
+
+                    GoToCurrentPatrolPoint();
+                }
+            }
 
             return;
         }
 
+
+        // ----------------------------------------
+        // WALKING
+        // ----------------------------------------
+
         agent.isStopped = false;
-        agent.speed = patrolSpeed;
 
-        if (!agent.pathPending &&
-            agent.remainingDistance <=
-            agent.stoppingDistance)
+        desiredMoveSpeed =
+            patrolSpeed;
+
+        if (!agent.pathPending)
         {
-            // Enemy reached the patrol point
-            SetMovementAnimation(
-                false,
-                false
-            );
-
-            // Face the direction defined
-            // by the patrol point
-            FacePatrolDirection();
-
-            waitTimer +=
-                Time.deltaTime;
-
-            if (waitTimer >=
-                patrolWaitTime)
+            // Preserve final approach direction.
+            if (!arrivalRotationLocked &&
+                agent.remainingDistance <=
+                arrivalRotationLockDistance)
             {
-                currentPatrolPoint++;
+                arrivalRotationLocked = true;
 
-                if (currentPatrolPoint >=
-                    patrolPoints.Length)
-                {
-                    currentPatrolPoint = 0;
-                }
+                agent.updateRotation = false;
+            }
+            else if (!arrivalRotationLocked)
+            {
+                agent.updateRotation = true;
+            }
 
-                GoToCurrentPatrolPoint();
+
+            // Arrival.
+            if (agent.remainingDistance <=
+                patrolStoppingDistance)
+            {
+                waitingAtPatrolPoint = true;
+
+                agent.isStopped = true;
+
+                agent.velocity =
+                    Vector3.zero;
+
+                agent.ResetPath();
+
+                agent.updateRotation = false;
+
+                desiredMoveSpeed = 0f;
+
+                SetMoveSpeedImmediate(0f);
 
                 waitTimer = 0f;
+
+                return;
             }
-        }
-        else
-        {
-            // Walk to patrol point
-            SetMovementAnimation(
-                true,
-                false
-            );
         }
     }
 
-    void FacePatrolDirection()
+
+    // ========================================================
+    // PATROL POINT ROTATION
+    // ========================================================
+
+    bool FacePatrolDirection()
     {
         if (patrolPoints == null ||
             patrolPoints.Length == 0)
         {
-            return;
+            return true;
         }
 
         Transform point =
             patrolPoints[currentPatrolPoint];
 
         if (point == null)
-            return;
+            return true;
 
-        Vector3 direction =
+        Vector3 targetDirection =
             point.forward;
 
-        direction.y = 0f;
+        targetDirection.y = 0f;
 
-        if (direction.sqrMagnitude >
+        if (targetDirection.sqrMagnitude <=
             0.001f)
         {
-            Quaternion targetRotation =
-                Quaternion.LookRotation(
-                    direction
-                );
-
-            transform.rotation =
-                Quaternion.Slerp(
-                    transform.rotation,
-                    targetRotation,
-                    patrolTurnSpeed *
-                    Time.deltaTime
-                );
+            return true;
         }
+
+        targetDirection.Normalize();
+
+        Quaternion targetRotation =
+            Quaternion.LookRotation(
+                targetDirection
+            );
+
+        float angle =
+            Quaternion.Angle(
+                transform.rotation,
+                targetRotation
+            );
+
+        if (angle <=
+            patrolTurnTolerance)
+        {
+            transform.rotation =
+                targetRotation;
+
+            return true;
+        }
+
+        transform.rotation =
+            Quaternion.RotateTowards(
+                transform.rotation,
+                targetRotation,
+                patrolTurnSpeed *
+                Time.deltaTime
+            );
+
+        return false;
     }
+
+
+    // ========================================================
+    // GO TO PATROL POINT
+    // ========================================================
 
     void GoToCurrentPatrolPoint()
     {
@@ -533,8 +861,35 @@ public class EnemyAI : MonoBehaviour
             return;
         }
 
+        waitingAtPatrolPoint = false;
+
+        arrivalRotationLocked = false;
+
+        waitTimer = 0f;
+
+
+        desiredMoveSpeed =
+            patrolSpeed;
+
+        SetMoveSpeedImmediate(
+            patrolSpeed
+        );
+
+        SetCombatAnimation(false);
+
+
+        agent.stoppingDistance =
+            patrolStoppingDistance;
+
+        agent.autoBraking = true;
+
+        // Normal NavMesh rotation during patrol.
+        agent.updateRotation = true;
+
         agent.isStopped = false;
-        agent.speed = patrolSpeed;
+
+        agent.speed =
+            patrolSpeed;
 
         agent.SetDestination(
             patrolPoints[
@@ -543,19 +898,38 @@ public class EnemyAI : MonoBehaviour
         );
     }
 
+
+    // ========================================================
+    // STOP CHASING
+    // ========================================================
+
     void StopChasing()
     {
         chasingPlayer = false;
+
         alertTimer = 0f;
 
-        ResetBurst();
+        waitingAtPatrolPoint = false;
 
-        SetCombatAnimation(false);
+        arrivalRotationLocked = false;
+
+        waitTimer = 0f;
+
+        ResetBurst();
 
         if (AgentReady())
         {
             agent.isStopped = false;
-            agent.speed = patrolSpeed;
+
+            agent.speed =
+                patrolSpeed;
+
+            agent.stoppingDistance =
+                patrolStoppingDistance;
+
+            agent.autoBraking = true;
+
+            agent.updateRotation = true;
         }
 
         if (patrolPoints != null &&
@@ -565,23 +939,40 @@ public class EnemyAI : MonoBehaviour
         }
     }
 
+
+    // ========================================================
+    // PLAYER DEATH
+    // ========================================================
+
     void HandlePlayerDeath()
     {
         chasingPlayer = false;
+
         alertTimer = 0f;
+
+        waitingAtPatrolPoint = false;
+
+        arrivalRotationLocked = false;
+
+        waitTimer = 0f;
 
         ResetBurst();
 
         if (AgentReady())
         {
             agent.isStopped = true;
+
+            agent.velocity =
+                Vector3.zero;
+
             agent.ResetPath();
+
+            agent.updateRotation = false;
         }
 
-        SetMovementAnimation(
-            false,
-            false
-        );
+        desiredMoveSpeed = 0f;
+
+        SetMoveSpeedImmediate(0f);
 
         SetCombatAnimation(false);
 
@@ -593,24 +984,38 @@ public class EnemyAI : MonoBehaviour
         }
     }
 
-    void SetMovementAnimation(
-        bool walking,
-        bool running
+
+    // ========================================================
+    // BLEND TREE MOVEMENT
+    // ========================================================
+
+    void UpdateMovementAnimation()
+    {
+        if (animator == null)
+            return;
+
+        animator.SetFloat(
+            "MoveSpeed",
+            desiredMoveSpeed,
+            movementAnimationDamping,
+            Time.deltaTime
+        );
+    }
+
+
+    void SetMoveSpeedImmediate(
+        float speed
     )
     {
         if (animator == null)
             return;
 
-        animator.SetBool(
-            "IsWalking",
-            walking
-        );
-
-        animator.SetBool(
-            "IsRunning",
-            running
+        animator.SetFloat(
+            "MoveSpeed",
+            speed
         );
     }
+
 
     void SetCombatAnimation(
         bool combat
@@ -625,12 +1030,18 @@ public class EnemyAI : MonoBehaviour
         }
     }
 
+
     bool AgentReady()
     {
         return agent != null &&
                agent.enabled &&
                agent.isOnNavMesh;
     }
+
+
+    // ========================================================
+    // ALERT FROM PLAYER SHOT
+    // ========================================================
 
     public void AlertPlayer()
     {
@@ -645,9 +1056,11 @@ public class EnemyAI : MonoBehaviour
         alertTimer =
             alertMemoryDuration;
 
-        waitTimer = 0f;
+        waitingAtPatrolPoint = false;
 
-        SetCombatAnimation(true);
+        arrivalRotationLocked = false;
+
+        waitTimer = 0f;
 
         if (player == null)
             return;
@@ -658,32 +1071,58 @@ public class EnemyAI : MonoBehaviour
                 player.position
             );
 
-        if (AgentReady())
+        if (!AgentReady())
+            return;
+
+        bool hasLineOfSight =
+            HasLineOfSightToPlayer();
+
+
+        // ----------------------------------------
+        // ALREADY CLOSE ENOUGH
+        // ----------------------------------------
+
+        if (distanceToPlayer <= attackRange &&
+            hasLineOfSight)
         {
-            if (distanceToPlayer >
-                attackRange)
-            {
-                agent.isStopped = false;
-                agent.speed = chaseSpeed;
+            desiredMoveSpeed = 0f;
 
-                agent.SetDestination(
-                    player.position
-                );
+            agent.isStopped = true;
 
-                SetMovementAnimation(
-                    false,
-                    true
-                );
-            }
-            else
-            {
-                agent.isStopped = true;
+            agent.velocity =
+                Vector3.zero;
 
-                SetMovementAnimation(
-                    false,
-                    false
-                );
-            }
+            agent.updateRotation = false;
+
+            SetCombatAnimation(true);
+
+            return;
         }
+
+
+        // ----------------------------------------
+        // CHASE PLAYER
+        // ----------------------------------------
+
+        desiredMoveSpeed =
+            chaseSpeed;
+
+        SetMoveSpeedImmediate(
+            chaseSpeed
+        );
+
+        SetCombatAnimation(false);
+
+        agent.isStopped = false;
+
+        agent.speed =
+            chaseSpeed;
+
+        // Script controls chase rotation.
+        agent.updateRotation = false;
+
+        agent.SetDestination(
+            player.position
+        );
     }
 }

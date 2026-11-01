@@ -132,3 +132,10 @@ Assets/Toon_RTS_demo.meta
 # Sci-Fi Soldier / Yurowm assets
 Assets/Yurowm/
 Assets/Yurowm.meta
+
+# Third-party Unity Asset Store assets
+/Assets/Lowpoly_Crates/
+/Assets/Lowpoly_Crates.meta
+
+/Assets/LowPolyBarriersPackFree/
+/Assets/LowPolyBarriersPackFree.meta
