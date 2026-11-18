@@ -9,6 +9,9 @@ public class EnemyAI : MonoBehaviour
     public Transform[] patrolPoints;
     public Animator animator;
 
+    [Header("Enemy Audio")]
+    public AudioSource gunAudioSource;
+
     [Header("Detection")]
     public float detectionRange = 8f;
     public float sightRange = 70f;
@@ -77,6 +80,14 @@ public class EnemyAI : MonoBehaviour
             animator = GetComponentInChildren<Animator>();
         }
 
+        // Automatically find the Audio Source
+        // on the enemy if it was not assigned manually.
+        if (gunAudioSource == null)
+        {
+            gunAudioSource =
+                GetComponent<AudioSource>();
+        }
+
         if (player != null)
         {
             playerHealth =
@@ -86,6 +97,7 @@ public class EnemyAI : MonoBehaviour
         if (AgentReady())
         {
             agent.speed = patrolSpeed;
+
             agent.stoppingDistance =
                 patrolStoppingDistance;
 
@@ -188,8 +200,6 @@ public class EnemyAI : MonoBehaviour
 
         if (chasingPlayer)
         {
-            // Attack only when close enough
-            // AND there is a clear path to player.
             if (distanceToPlayer <= attackRange &&
                 hasLineOfSight)
             {
@@ -406,9 +416,8 @@ public class EnemyAI : MonoBehaviour
         agent.isStopped = false;
         agent.speed = chaseSpeed;
 
-        // IMPORTANT:
-        // NavMesh still calculates the path,
-        // but our script controls rotation.
+        // NavMesh calculates the path,
+        // but the script controls rotation.
         agent.updateRotation = false;
 
         agent.SetDestination(
@@ -416,8 +425,6 @@ public class EnemyAI : MonoBehaviour
         );
 
 
-        // Rotate towards the NavMesh's desired
-        // movement direction.
         FaceChaseDirection();
     }
 
@@ -472,7 +479,6 @@ public class EnemyAI : MonoBehaviour
             agent.velocity =
                 Vector3.zero;
 
-            // Script controls rotation.
             agent.updateRotation = false;
         }
 
@@ -490,7 +496,6 @@ public class EnemyAI : MonoBehaviour
             FacePlayer();
 
 
-        // Do not shoot while turning.
         if (!facingPlayer)
         {
             ResetBurst();
@@ -599,6 +604,11 @@ public class EnemyAI : MonoBehaviour
             return;
         }
 
+
+        // ----------------------------------------
+        // SHOOT ANIMATION
+        // ----------------------------------------
+
         if (animator != null)
         {
             animator.SetTrigger(
@@ -606,9 +616,32 @@ public class EnemyAI : MonoBehaviour
             );
         }
 
+
+        // ----------------------------------------
+        // ENEMY GUNSHOT SOUND
+        // ----------------------------------------
+
+        if (gunAudioSource != null &&
+            gunAudioSource.clip != null)
+        {
+            gunAudioSource.PlayOneShot(
+                gunAudioSource.clip
+            );
+        }
+
+
+        // ----------------------------------------
+        // DAMAGE PLAYER
+        // ----------------------------------------
+
         playerHealth.TakeDamage(
             attackDamage
         );
+
+
+        // ----------------------------------------
+        // BURST COUNTER
+        // ----------------------------------------
 
         shotsFiredInBurst++;
 
@@ -735,7 +768,6 @@ public class EnemyAI : MonoBehaviour
 
         if (!agent.pathPending)
         {
-            // Preserve final approach direction.
             if (!arrivalRotationLocked &&
                 agent.remainingDistance <=
                 arrivalRotationLockDistance)
@@ -750,7 +782,6 @@ public class EnemyAI : MonoBehaviour
             }
 
 
-            // Arrival.
             if (agent.remainingDistance <=
                 patrolStoppingDistance)
             {
@@ -883,7 +914,6 @@ public class EnemyAI : MonoBehaviour
 
         agent.autoBraking = true;
 
-        // Normal NavMesh rotation during patrol.
         agent.updateRotation = true;
 
         agent.isStopped = false;
@@ -1118,7 +1148,6 @@ public class EnemyAI : MonoBehaviour
         agent.speed =
             chaseSpeed;
 
-        // Script controls chase rotation.
         agent.updateRotation = false;
 
         agent.SetDestination(

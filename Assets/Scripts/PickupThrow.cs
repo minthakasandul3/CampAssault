@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -12,12 +13,23 @@ public class PickupThrow : MonoBehaviour
     public GameObject crosshair;
     public GunShoot gunShoot;
 
-    [Header("Settings")]
+    [Header("Pickup Settings")]
     public float pickupRange = 3f;
+    public float pickupRadius = 0.22f;
+
+    // Helps when the player is extremely close.
+    public float closePickupRange = 1.2f;
+
+    [Header("Throw Settings")]
     public float throwForce = 8f;
 
     private Rigidbody heldBody;
-    private Collider heldCollider;
+
+    // Only colliders that WE disable while holding
+    // are stored here.
+    private List<Collider> collidersDisabledForHold =
+        new List<Collider>();
+
 
     void Update()
     {
@@ -25,6 +37,7 @@ public class PickupThrow : MonoBehaviour
 
         if (keyboard == null)
             return;
+
 
         // F = Pick up / Drop
         if (keyboard.fKey.wasPressedThisFrame)
@@ -39,6 +52,7 @@ public class PickupThrow : MonoBehaviour
             }
         }
 
+
         // G = Throw
         if (keyboard.gKey.wasPressedThisFrame &&
             heldBody != null)
@@ -47,90 +61,371 @@ public class PickupThrow : MonoBehaviour
         }
     }
 
+
+    // ========================================================
+    // PICK UP
+    // ========================================================
+
     void TryPickup()
     {
-        Ray ray = new Ray(
-            playerCamera.transform.position,
-            playerCamera.transform.forward
+        Rigidbody body =
+            FindPickupObject();
+
+        if (body == null)
+            return;
+
+
+        heldBody = body;
+
+        heldBody.linearVelocity =
+            Vector3.zero;
+
+        heldBody.angularVelocity =
+            Vector3.zero;
+
+
+        // ----------------------------------------
+        // SAVE ONLY CURRENTLY ENABLED COLLIDERS
+        // ----------------------------------------
+
+        collidersDisabledForHold.Clear();
+
+        Collider[] objectColliders =
+            heldBody.GetComponentsInChildren<Collider>();
+
+        foreach (Collider col in objectColliders)
+        {
+            if (col != null &&
+                col.enabled)
+            {
+                collidersDisabledForHold.Add(col);
+
+                col.enabled = false;
+            }
+        }
+
+
+        // ----------------------------------------
+        // DISABLE PHYSICS WHILE HELD
+        // ----------------------------------------
+
+        heldBody.useGravity = false;
+        heldBody.isKinematic = true;
+
+
+        // ----------------------------------------
+        // MOVE TO HOLD POINT
+        // ----------------------------------------
+
+        heldBody.transform.SetParent(
+            holdPoint
         );
 
-        RaycastHit hit;
+        heldBody.transform.localPosition =
+            Vector3.zero;
 
-        if (Physics.Raycast(ray, out hit, pickupRange))
+        heldBody.transform.localRotation =
+            Quaternion.identity;
+
+
+        SetWeaponVisible(false);
+    }
+
+
+    // ========================================================
+    // FIND PICKUP OBJECT
+    // ========================================================
+
+    Rigidbody FindPickupObject()
+    {
+        if (playerCamera == null)
+            return null;
+
+
+        Vector3 origin =
+            playerCamera.transform.position;
+
+        Vector3 direction =
+            playerCamera.transform.forward;
+
+
+        // ====================================================
+        // NORMAL / MEDIUM DISTANCE PICKUP
+        //
+        // SphereCastAll instead of SphereCast.
+        // This prevents another collider from automatically
+        // stopping us from finding the Throwable object.
+        // ====================================================
+
+        RaycastHit[] hits =
+            Physics.SphereCastAll(
+                origin,
+                pickupRadius,
+                direction,
+                pickupRange,
+                Physics.AllLayers,
+                QueryTriggerInteraction.Ignore
+            );
+
+
+        System.Array.Sort(
+            hits,
+            (a, b) =>
+                a.distance.CompareTo(b.distance)
+        );
+
+
+        foreach (RaycastHit hit in hits)
         {
-            if (!hit.collider.CompareTag("Throwable"))
-                return;
+            if (hit.collider == null)
+                continue;
+
+
+            // Ignore Player's own colliders.
+            if (IsPlayerCollider(hit.collider))
+                continue;
+
 
             Rigidbody body =
-                hit.collider.attachedRigidbody;
+                GetThrowableBody(
+                    hit.collider
+                );
+
+
+            if (body != null)
+            {
+                return body;
+            }
+        }
+
+
+        // ====================================================
+        // VERY CLOSE PICKUP
+        //
+        // When the can is almost touching the player,
+        // search around the player's lower body instead of
+        // around camera height.
+        // ====================================================
+
+        Vector3 closeCheckPosition =
+            transform.position +
+            Vector3.up * 0.6f;
+
+
+        Collider[] closeColliders =
+            Physics.OverlapSphere(
+                closeCheckPosition,
+                closePickupRange,
+                Physics.AllLayers,
+                QueryTriggerInteraction.Ignore
+            );
+
+
+        Rigidbody bestBody = null;
+
+        float bestScore =
+            Mathf.Infinity;
+
+
+        foreach (Collider col in closeColliders)
+        {
+            if (col == null)
+                continue;
+
+
+            if (IsPlayerCollider(col))
+                continue;
+
+
+            Rigidbody body =
+                GetThrowableBody(col);
 
             if (body == null)
-                return;
+                continue;
 
-            heldBody = body;
-            heldCollider = hit.collider;
 
-            heldBody.linearVelocity = Vector3.zero;
-            heldBody.angularVelocity = Vector3.zero;
+            Vector3 targetPosition =
+                col.bounds.center;
 
-            heldBody.useGravity = false;
-            heldBody.isKinematic = true;
 
-            if (heldCollider != null)
+            Vector3 toObject =
+                targetPosition -
+                playerCamera.transform.position;
+
+
+            float distance =
+                toObject.magnitude;
+
+
+            if (distance <= 0.001f)
+                return body;
+
+
+            Vector3 toObjectDirection =
+                toObject.normalized;
+
+
+            float forwardAmount =
+                Vector3.Dot(
+                    playerCamera.transform.forward,
+                    toObjectDirection
+                );
+
+
+            // Must be somewhere in front of player.
+            if (forwardAmount < 0.15f)
+                continue;
+
+
+            // Prefer an object closer to the centre
+            // of the player's view.
+            float angle =
+                Vector3.Angle(
+                    playerCamera.transform.forward,
+                    toObjectDirection
+                );
+
+
+            float score =
+                angle +
+                distance * 5f;
+
+
+            if (score < bestScore)
             {
-                heldCollider.enabled = false;
+                bestScore = score;
+
+                bestBody = body;
             }
-
-            heldBody.transform.SetParent(holdPoint);
-
-            heldBody.transform.localPosition =
-                Vector3.zero;
-
-            heldBody.transform.localRotation =
-                Quaternion.identity;
-
-            SetWeaponVisible(false);
         }
+
+
+        return bestBody;
     }
+
+
+    // ========================================================
+    // THROWABLE CHECK
+    // ========================================================
+
+    Rigidbody GetThrowableBody(
+        Collider col
+    )
+    {
+        if (col == null)
+            return null;
+
+
+        Rigidbody body =
+            col.attachedRigidbody;
+
+
+        if (body == null)
+            return null;
+
+
+        // Tag can be on collider object
+        // OR Rigidbody/root object.
+        if (col.CompareTag("Throwable") ||
+            body.CompareTag("Throwable"))
+        {
+            return body;
+        }
+
+
+        return null;
+    }
+
+
+    // ========================================================
+    // IGNORE PLAYER COLLIDERS
+    // ========================================================
+
+    bool IsPlayerCollider(
+        Collider col
+    )
+    {
+        if (col == null)
+            return false;
+
+
+        Transform colTransform =
+            col.transform;
+
+
+        if (colTransform == transform)
+            return true;
+
+
+        if (colTransform.IsChildOf(transform))
+            return true;
+
+
+        return false;
+    }
+
+
+    // ========================================================
+    // DROP
+    // ========================================================
 
     void DropObject()
     {
-        heldBody.transform.SetParent(null);
+        if (heldBody == null)
+            return;
 
-        heldBody.isKinematic = false;
-        heldBody.useGravity = true;
 
-        if (heldCollider != null)
-        {
-            heldCollider.enabled = true;
-        }
+        Rigidbody bodyToDrop =
+            heldBody;
+
+
+        bodyToDrop.transform.SetParent(
+            null
+        );
+
+
+        bodyToDrop.isKinematic = false;
+        bodyToDrop.useGravity = true;
+
+
+        RestoreHeldColliders();
+
 
         heldBody = null;
-        heldCollider = null;
+
 
         SetWeaponVisible(true);
     }
 
+
+    // ========================================================
+    // THROW
+    // ========================================================
+
     void ThrowObject()
     {
+        if (heldBody == null)
+            return;
+
+
         Rigidbody bodyToThrow =
             heldBody;
 
-        Collider colliderToEnable =
-            heldCollider;
 
-        bodyToThrow.transform.SetParent(null);
+        bodyToThrow.transform.SetParent(
+            null
+        );
+
 
         bodyToThrow.isKinematic = false;
         bodyToThrow.useGravity = true;
 
-        if (colliderToEnable != null)
-        {
-            colliderToEnable.enabled = true;
-        }
+
+        RestoreHeldColliders();
+
 
         heldBody = null;
-        heldCollider = null;
+
 
         bodyToThrow.AddForce(
             playerCamera.transform.forward *
@@ -138,24 +433,59 @@ public class PickupThrow : MonoBehaviour
             ForceMode.Impulse
         );
 
+
         SetWeaponVisible(true);
     }
 
-    void SetWeaponVisible(bool visible)
+
+    // ========================================================
+    // RESTORE COLLIDERS
+    // ========================================================
+
+    void RestoreHeldColliders()
+    {
+        foreach (Collider col
+                 in collidersDisabledForHold)
+        {
+            if (col != null)
+            {
+                col.enabled = true;
+            }
+        }
+
+
+        collidersDisabledForHold.Clear();
+    }
+
+
+    // ========================================================
+    // WEAPON / CROSSHAIR
+    // ========================================================
+
+    void SetWeaponVisible(
+        bool visible
+    )
     {
         if (gunObject != null)
         {
-            gunObject.SetActive(visible);
+            gunObject.SetActive(
+                visible
+            );
         }
+
 
         if (crosshair != null)
         {
-            crosshair.SetActive(visible);
+            crosshair.SetActive(
+                visible
+            );
         }
+
 
         if (gunShoot != null)
         {
-            gunShoot.enabled = visible;
+            gunShoot.enabled =
+                visible;
         }
     }
 }

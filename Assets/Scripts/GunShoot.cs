@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
+[RequireComponent(typeof(AudioSource))]
 public class GunShoot : MonoBehaviour
 {
     [Header("References")]
@@ -12,6 +13,16 @@ public class GunShoot : MonoBehaviour
 
     [Header("Enemy Hearing")]
     public float hearingRange = 45f;
+
+    private AudioSource gunAudioSource;
+
+
+    void Start()
+    {
+        gunAudioSource =
+            GetComponent<AudioSource>();
+    }
+
 
     void Update()
     {
@@ -26,10 +37,29 @@ public class GunShoot : MonoBehaviour
         }
     }
 
+
     void Shoot()
     {
-        // Alert enemies that hear the gunshot
+        // -----------------------------
+        // PLAY GUNSHOT SOUND
+        // -----------------------------
+
+        if (gunAudioSource != null)
+        {
+            gunAudioSource.Play();
+        }
+
+
+        // -----------------------------
+        // ALERT NEARBY ENEMIES
+        // -----------------------------
+
         AlertNearbyEnemies();
+
+
+        // -----------------------------
+        // SHOOTING RAY
+        // -----------------------------
 
         Ray ray = new Ray(
             playerCamera.transform.position,
@@ -38,34 +68,52 @@ public class GunShoot : MonoBehaviour
 
         RaycastHit hit;
 
-        if (Physics.Raycast(ray, out hit, range))
+
+        if (Physics.Raycast(
+            ray,
+            out hit,
+            range))
         {
             Debug.Log(
-                "Hit: " + hit.transform.name
+                "Hit: " +
+                hit.transform.name
             );
 
-            // Find the enemy AI first
-            EnemyAI enemyAI =
-                hit.transform.GetComponentInParent<EnemyAI>();
 
-            // Alert the enemy BEFORE applying damage
+            // -------------------------
+            // ALERT HIT ENEMY
+            // -------------------------
+
+            EnemyAI enemyAI =
+                hit.transform
+                    .GetComponentInParent<EnemyAI>();
+
             if (enemyAI != null)
             {
                 enemyAI.AlertPlayer();
             }
 
-            // Then apply damage
+
+            // -------------------------
+            // APPLY DAMAGE
+            // -------------------------
+
             EnemyHealth enemyHealth =
-                hit.transform.GetComponentInParent<EnemyHealth>();
+                hit.transform
+                    .GetComponentInParent<EnemyHealth>();
 
             if (enemyHealth != null)
             {
-                enemyHealth.TakeDamage(damage);
+                enemyHealth.TakeDamage(
+                    damage
+                );
             }
+
 
             Debug.DrawRay(
                 ray.origin,
-                ray.direction * hit.distance,
+                ray.direction *
+                hit.distance,
                 Color.red,
                 1f
             );
@@ -74,12 +122,18 @@ public class GunShoot : MonoBehaviour
         {
             Debug.DrawRay(
                 ray.origin,
-                ray.direction * range,
+                ray.direction *
+                range,
                 Color.green,
                 1f
             );
         }
     }
+
+
+    // ========================================================
+    // ENEMY HEARING
+    // ========================================================
 
     void AlertNearbyEnemies()
     {
@@ -89,10 +143,13 @@ public class GunShoot : MonoBehaviour
                 hearingRange
             );
 
-        foreach (Collider nearbyObject in nearbyObjects)
+
+        foreach (Collider nearbyObject
+                 in nearbyObjects)
         {
             EnemyAI enemy =
-                nearbyObject.GetComponentInParent<EnemyAI>();
+                nearbyObject
+                    .GetComponentInParent<EnemyAI>();
 
             if (enemy != null)
             {
